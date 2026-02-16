@@ -138,11 +138,11 @@ Thumbs.db
 # Data files
 data/
 datasets/
-*.csv
+#*.csv
 temp_data.csv
 
 # Models (optional - comment out to keep models in repo)
-models/*.pkl
+#models/*.pkl
 
 # Additional
 .env.local
