@@ -98,6 +98,17 @@ class ProductionModel:
                 file_path = os.path.join(self.models_dir, file_name)
                 if os.path.exists(file_path):
                     self.models[model_name] = joblib.load(file_path)
+
+            # If KNN is loaded, enable parallel neighbor search to speed up predictions
+            if 'K-Nearest Neighbors' in self.models:
+                try:
+                    knn_model = self.models['K-Nearest Neighbors']
+                    # Set n_jobs to -1 to use all cores for neighbor search/prediction
+                    if hasattr(knn_model, 'n_jobs'):
+                        knn_model.n_jobs = -1
+                        self.models['K-Nearest Neighbors'] = knn_model
+                except Exception:
+                    pass
             
             # Load results
             results_path = os.path.join(self.models_dir, 'training_results.json')
@@ -121,19 +132,34 @@ class ProductionModel:
             
             # Select only numeric columns
             X = X.select_dtypes(include=[np.number])
-            
-            # Keep only imputed columns that exist
-            existing_cols = [col for col in self.imputed_columns if col in X.columns]
-            X = X[existing_cols]
-            
-            # Impute
+            # Normalize column names: strip whitespace
+            X.columns = X.columns.str.strip()
+
+            # If the uploaded data already contains the selected features (post-selection & scaled),
+            # then skip imputation/scaling/selection and use directly.
+            if self.selected_columns is not None:
+                selected_set = set([c.strip() for c in self.selected_columns])
+                uploaded_set = set(X.columns.tolist())
+
+                if selected_set.issubset(uploaded_set) and len(X.columns) == len(self.selected_columns):
+                    # Reindex to ensure correct column order and return
+                    X = X.reindex(columns=[c.strip() for c in self.selected_columns])
+                    return X
+
+            # Ensure all imputed columns are present and in the same order as during training.
+            # Missing columns will be filled with NaN so the imputer can handle them.
+            expected_cols = list(self.imputed_columns) if self.imputed_columns is not None else list(X.columns)
+            expected_cols = [c.strip() for c in expected_cols]
+            X = X.reindex(columns=expected_cols)
+
+            # Impute (the imputer expects the same feature names as during fit)
             X_imputed = self.imputer.transform(X)
-            X = pd.DataFrame(X_imputed, columns=existing_cols)
-            
+            X = pd.DataFrame(X_imputed, columns=expected_cols)
+
             # Scale
             X_scaled = self.scaler.transform(X)
-            X = pd.DataFrame(X_scaled, columns=existing_cols)
-            
+            X = pd.DataFrame(X_scaled, columns=expected_cols)
+
             # Select features
             X_selected = self.feature_selector.transform(X)
             X = pd.DataFrame(X_selected, columns=self.selected_columns)
